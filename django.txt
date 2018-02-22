@@ -1,0 +1,285 @@
+vi /etc/sysconfig/network-scripts/ifcfg-enp0s3
+==================================
+TYPE=Ethernet
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=none
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+IPV6INIT=no
+IPV6_AUTOCONF=yes
+IPV6_DEFROUTE=yes
+IPV6_FAILURE_FATAL=no
+IPV6_ADDR_GEN_MODE=stable-privacy
+NAME=enp0s3
+UUID=027fbeba-a727-4315-adae-99d9c050eb48
+DEVICE=enp0s3
+ONBOOT=yes
+IPADDR=192.168.50.30 #your IPADD
+PREFIX=24
+GATEWAY=192.168.50.1
+DNS1=172.16.1.3
+DNS2=8.8.8.8
+ZONE=public
+==================================
+
+vi /etc/yum.conf
+==================================
+proxy=http://172.16.1.5:3128
+==================================
+
+vi /etc/profile
+===================================
+PROXY='172.16.1.5:3128'
+export http_proxy=http://$PROXY
+export HTTP_PROXY=http://$PROXY
+export https_proxy=https://$PROXY
+export HTTPS_PROXY=https://$PROXY
+
+export no_proxy=localhost,127.0.0.1,192.168.0.*,192.168.50.*
+====================================
+
+vi /etc/selinux/config
+===================================
+- SELINUX=enforcing
++ SELINUX=disabled
+===================================
+
+yum update -y
+yum -y install epel-release
+yum -y groupinstall development
+yum -y install yum-utils vim
+yum -y install https://centos7.iuscommunity.org/ius-release.rpm
+yum -y install python36u
+yum -y install python36u-pip python36u-devel
+
+useradd dev
+passwd dev
+
+visudo
+/root
+=======================
+dev	ALL=(ALL)	ALL
+=======================
+
+su dev
+cd ~
+sudo yum install -y gcc postgresql-server postgresql-devel postgresql-contrib
+sudo postgresql-setup initdb
+sudo systemctl start postgresql
+
+sudo systemctl restart postgresql
+sudo systemctl enable postgresql
+
+sudo su - postgres
+psql
+\password postgres;
+
+CREATE DATABASE myproject;
+CREATE USER myprojectuser WITH PASSWORD 'password';
+ALTER ROLE myprojectuser SET client_encoding TO 'utf8';
+ALTER ROLE myprojectuser SET default_transaction_isolation TO 'read committed';
+ALTER ROLE myprojectuser SET timezone TO 'UTC';
+GRANT ALL PRIVILEGES ON DATABASE myproject TO myprojectuser;
+\q
+exit
+
+sudo vim /var/lib/pgsql/data/pg_hba.conf
+=======================
+# "local" is for Unix domain socket connections only
+- local   all             all                                     peer
++ local   all             all                                     md5
+# IPv4 local connections:
+- host    all             all             127.0.0.1/32            ident
++ host    all             all             127.0.0.1/32            md5
+# IPv6 local connections:
+- host    all             all             ::1/128                 ident
++ host    all             all             ::1/128                 md5
+=======================
+
+python3.6 -m venv ~/myprojectenv
+source myprojectenv/bin/activate
+
+pip install django
+(pip install django --proxy=172.16.1.5:3128)
+
+django-admin startproject myproject
+cd myproject
+python3.6 manage.py startapp app
+
+vim app/views.py
+========================
+from django.shortcuts import render
+from django.http import HttpResponse
+
+def index(request):
+    return HttpResponse("Hello world.")
+========================
+
+vim myproject/urls.py
+=======================
+from django.conf.urls import url, include
+from django.contrib import admin
+
+urlpatterns = [
+    url(r'^admin/', admin.site.urls),
+    url(r'^app/', include('app.urls')),
+]
+=======================
+
+vim app/urls.py
+=======================
+from django.conf.urls import url
+
+from . import views
+
+urlpatterns = [
+    url(r'^$', views.index, name="index"),
+]
+=======================
+
+pip install psycopg2
+pip install psycopg2-binary
+
+vim ~/myproject/myproject/settings.py
+=============================================
+BASE_DIR=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+STATIC_ROOT = os.path.join(PROJECT_ROOT, 'staticfiles')
+STATIC_URL = '/static/'
+
+STATICFILES_DIRS = (
+    os.path.join(PROJECT_ROOT, 'static'),
+)
+
+  INSTALLED_APPS = [
+      'django.contrib.admin',
+      'django.contrib.auth',
+      'django.contrib.contenttypes',
+      'django.contrib.sessions',
+      'django.contrib.messages',
+      'django.contrib.staticfiles',
++     'app',
+  ]
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'NAME': 'myproject',
+        'USER': 'myprojectuser',
+        'PASSWORD': 'password',
+        'HOST': 'localhost',
+        'PORT': '',
+    }
+}
+
+- DEBUG = True
++ DEBUG = False
+
+- ALLOWED_HOSTS = []
++ ALLOWED_HOSTS = ['192.168.50.30']
+
+
+- LANGUAGE_CODE = 'en-us'
++ LANGUAGE_CODE = 'ja'
+
+- TIME_ZONE = 'UTC'
++ TIME_ZONE = 'Asia/Tokyo'
+
+=============================================
+
+python3.6 manage.py makemigrations
+python3.6 manage.py migrate
+
+python3.6 manage.py createsuperuser
+- - - - - - - - - - - - 
+<your name>
+<your Email>
+<your password>
+- - - - - - - - - - - - 
+
+./manage.py collectstatic
+
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --reload
+
+./manage.py runserver 0.0.0.0:8080
+<http://192.168.50.30:8080/app>
+----------------------
+  Hello world.
+----------------------
+
+
+
+sudo yum install -y httpd httpd-devel
+source ~/myprojectenv/bin/activate
+pip3.6 install mod_wsgi
+
+sudo vim /etc/httpd/conf.modules.d/django-wsgi.conf
+============================================
+LoadModule wsgi_module /home/dev/myprojectenv/lib/python3.6/site-packages/mod_wsgi/server/mod_wsgi-py36.cpython-36m-x86_64-linux-gnu.so
+============================================
+
+sudo vim /etc/httpd/conf.d/django.conf
+============================================
+WSGIDaemonProcess myproject python-path=/home/dev/myproject:/home/dev/myprojectenv/lib/python3.6/site-packages
+WSGIProcessGroup myproject
+WSGIScriptAlias /django /home/dev/myproject/myproject/wsgi.py
+
+<Directory /home/dev/myproject/myproject>
+    <Files wsgi.py>
+        Require all granted
+    </Files>
+</Directory>
+============================================
+
+sudo firewall-cmd --permanent --zone=public --add-service=http
+sudo firewall-cmd --permanent --zone=public --add-service=https
+sudo firewall-cmd --reload
+
+sudo chmod 755 -R /home/dev
+
+sudo vim /etc/httpd/conf/httpd.conf
+=============================================
+Alias /static/admin/ /home/dev/myprojectenv/lib/python3.6/site-packages/django/contrib/admin/static/admin/
+
+<Directory "/home/dev/">
+    Require all granted
+</Directory>
+
+<EOF>
+=============================================
+
+sudo systemctl restart httpd
+
+sudo tail -f /var/log/httpd/error_log
+
+<http://192.168.50.30/django/app>
+----------------------
+  Hello world.
+----------------------
+
+cd ~/myproject
+pip install pillow
+vim myproject/settings.py
+=====================================
++ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
++ MEDIA_URL = '/media/'
+=====================================
+mkdir media
+sudo chmod a+w media
+
+
+sudo vim /etc/httpd/conf/httpd.conf
+=====================================
+Alias /static/admin/ /home/dev/myprojectenv/lib/python3.6/site-packages/django/contrib/admin/static/admin/
+
+Alias /media/ /home/dev/myproject/media/
+
+<Directory "/home/dev/">
+    Require all granted
+</Directory>
+
+<EOF>
+=====================================
